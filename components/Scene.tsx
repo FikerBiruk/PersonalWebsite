@@ -34,13 +34,11 @@ function ParticleName() {
     const textGeo = new TextGeometry('FIKER', {
       font: font,
       size: 3,
-      height: 1.2, // THICKER for 3D depth
+      height: 0.8, // Slightly reduced to avoid looking too stretched
       curveSegments: 12,
       bevelEnabled: true,
       bevelThickness: 0.1,
       bevelSize: 0.1,
-      bevelOffset: 0,
-      bevelSegments: 5
     })
     textGeo.center()
 
