@@ -1,19 +1,19 @@
 'use client'
 
-import React, { useRef, useMemo, useState, useEffect } from 'react'
-import { Canvas, useFrame, useLoader } from '@react-three/fiber'
+import React, { useRef, useMemo, useState, useEffect, Suspense } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
 import {
   ScrollControls,
   Scroll,
   useScroll,
   PerspectiveCamera,
   Stars,
-  Center,
   Text3D
 } from '@react-three/drei'
 import * as THREE from 'three'
 
-// Font URL for the 3D text
+// Use a local font path or a more reliable CDN if possible.
+// For now, keeping the CDN but wrapping in Suspense to prevent crashes.
 const FONT_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/fonts/helvetiker_bold.typeface.json'
 
 function ParticleName() {
@@ -45,34 +45,33 @@ function ParticleName() {
     return pos
   }, [])
 
-  // This helper component is used just to extract geometry data from Text3D
+  // This helper component extracts geometry data from Text3D
   const GeometryExtractor = () => {
     const meshRef = useRef<THREE.Mesh>(null!)
 
     useEffect(() => {
-      if (meshRef.current) {
+      if (meshRef.current && meshRef.current.geometry) {
         const geometry = meshRef.current.geometry
         geometry.center()
 
-        // Sample points from the geometry surface
-        const sampler = new THREE.BufferGeometry().copy(geometry)
         const posAttr = geometry.getAttribute('position')
         const samples = new Float32Array(count * 3)
 
-        for (let i = 0; i < count; i++) {
-          // Pick a random vertex from the text geometry
-          const index = Math.floor(Math.random() * posAttr.count)
-          samples[i * 3] = posAttr.getX(index)
-          samples[i * 3 + 1] = posAttr.getY(index)
-          samples[i * 3 + 2] = posAttr.getZ(index)
+        if (posAttr) {
+          for (let i = 0; i < count; i++) {
+            const index = Math.floor(Math.random() * posAttr.count)
+            samples[i * 3] = posAttr.getX(index)
+            samples[i * 3 + 1] = posAttr.getY(index)
+            samples[i * 3 + 2] = posAttr.getZ(index)
+          }
+          setTextPositions(samples)
         }
-        setTextPositions(samples)
       }
-    }, [meshRef])
+    }, [])
 
     return (
       <mesh ref={meshRef} visible={false}>
-        <Text3D font={FONT_URL} size={2} height={0.5} curveSegments={12} bevelEnabled bevelThickness={0.02} bevelSize={0.02}>
+        <Text3D font={FONT_URL} size={2} height={0.5}>
           FIKER
         </Text3D>
       </mesh>
@@ -82,53 +81,43 @@ function ParticleName() {
   useFrame((state) => {
     if (!textPositions || !pointsRef.current) return
 
-    const offset = scroll.offset // 0 to 1
+    const offset = scroll.offset
     const positions = pointsRef.current.geometry.attributes.position.array as Float32Array
-
-    // Animation phases
-    // 0.0 -> 0.4: Random -> "FIKER"
-    // 0.4 -> 0.6: Stay as "FIKER" + Rotate
-    // 0.6 -> 1.0: "FIKER" -> Dissolve
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
       let targetX, targetY, targetZ
 
       if (offset < 0.4) {
-        // Morph from Initial to Text
         const t = offset / 0.4
         targetX = THREE.MathUtils.lerp(initialPositions[i3], textPositions[i3], t)
         targetY = THREE.MathUtils.lerp(initialPositions[i3 + 1], textPositions[i3 + 1], t)
         targetZ = THREE.MathUtils.lerp(initialPositions[i3 + 2], textPositions[i3 + 2], t)
       } else if (offset < 0.6) {
-        // Stay as Text
         targetX = textPositions[i3]
         targetY = textPositions[i3 + 1]
         targetZ = textPositions[i3 + 2]
       } else {
-        // Morph from Text to Final (Dissolve)
         const t = (offset - 0.6) / 0.4
         targetX = THREE.MathUtils.lerp(textPositions[i3], finalPositions[i3], t)
         targetY = THREE.MathUtils.lerp(textPositions[i3 + 1], finalPositions[i3 + 1], t)
         targetZ = THREE.MathUtils.lerp(textPositions[i3 + 2], finalPositions[i3 + 2], t)
       }
 
-      // Smooth interpolation for current position
       positions[i3] = THREE.MathUtils.lerp(positions[i3], targetX, 0.1)
       positions[i3 + 1] = THREE.MathUtils.lerp(positions[i3 + 1], targetY, 0.1)
       positions[i3 + 2] = THREE.MathUtils.lerp(positions[i3 + 2], targetZ, 0.1)
     }
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
-
-    // Subtle rotation of the whole group
     pointsRef.current.rotation.y = state.clock.getElapsedTime() * 0.1 + offset * Math.PI
-    pointsRef.current.rotation.x = Math.sin(state.clock.getElapsedTime() * 0.2) * 0.1
   })
 
   return (
     <>
-      <GeometryExtractor />
+      <Suspense fallback={null}>
+        <GeometryExtractor />
+      </Suspense>
       <points ref={pointsRef}>
         <bufferGeometry>
           <bufferAttribute
@@ -158,7 +147,6 @@ function SceneContent() {
   useFrame(() => {
     const offset = scroll.offset
     if (cameraRef.current) {
-      // Camera moves slightly forward and back
       cameraRef.current.position.z = 8 + Math.sin(offset * Math.PI) * 2
       cameraRef.current.lookAt(0, 0, 0)
     }
@@ -169,15 +157,13 @@ function SceneContent() {
       <PerspectiveCamera makeDefault ref={cameraRef} position={[0, 0, 8]} />
       <ambientLight intensity={1} />
       <pointLight position={[10, 10, 10]} intensity={1.5} color="#3b82f6" />
-
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
       <ParticleName />
 
       <Scroll html>
-        <div className="w-screen text-white font-sans">
-          {/* Section 1: Hero */}
-          <section className="h-screen flex flex-col justify-center px-6 md:px-12 max-w-7xl mx-auto">
+        <div className="w-screen text-white font-sans pointer-events-none">
+          <section className="h-screen flex flex-col justify-center px-6 md:px-12 max-w-7xl mx-auto pointer-events-auto">
             <div className="max-w-3xl">
               <h2 className="text-blue-500 font-mono tracking-widest mb-4 uppercase text-sm">Scroll to assemble</h2>
               <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-none mb-8">
@@ -189,16 +175,14 @@ function SceneContent() {
             </div>
           </section>
 
-          {/* Section 2: Transitions */}
-          <section className="h-screen flex items-center justify-center px-6">
+          <section className="h-screen flex items-center justify-center px-6 pointer-events-auto">
             <div className="text-center">
               <h2 className="text-4xl md:text-6xl font-bold tracking-tight mb-4">Molding Data</h2>
               <p className="text-neutral-400 text-lg md:text-xl">Transforming raw particles into meaningful structures.</p>
             </div>
           </section>
 
-          {/* Section 3: Contact */}
-          <section className="h-screen flex flex-col justify-center items-center px-6 text-center">
+          <section className="h-screen flex flex-col justify-center items-center px-6 text-center pointer-events-auto">
             <h2 className="text-5xl md:text-7xl font-bold tracking-tighter mb-12">Let's work together.</h2>
             <div className="flex gap-8 text-neutral-400 text-lg">
               <a href="https://github.com/FikerBiruk" className="hover:text-blue-500 transition-colors">GitHub</a>
