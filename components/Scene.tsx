@@ -23,7 +23,6 @@ function ParticleName() {
   const words = ["FIKER", "BIRUK", "RANDOM", "TESTING", "OTHER"]
 
   const data = useMemo(() => {
-    // 1. Initial random cloud (Nebula)
     const initial = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
       initial[i * 3] = (Math.random() - 0.5) * 60
@@ -31,12 +30,11 @@ function ParticleName() {
       initial[i * 3 + 2] = (Math.random() - 0.5) * 60
     }
 
-    // 2. Generate targets for all words
     const targets = words.map((word) => {
       const textGeo = new TextGeometry(word, {
         font: font,
         size: word.length > 7 ? 2 : 2.5,
-        height: 1.0, // Decent depth
+        height: 1.0,
         curveSegments: 8,
         bevelEnabled: true,
         bevelThickness: 0.15,
@@ -52,13 +50,11 @@ function ParticleName() {
         sampler.sample(tempPos)
         targetArr[i * 3] = tempPos.x
         targetArr[i * 3 + 1] = tempPos.y
-        // Add jitter to fill the 3D volume
         targetArr[i * 3 + 2] = tempPos.z + (Math.random() - 0.5) * 0.5
       }
       return targetArr
     })
 
-    // 3. Final explosion
     const explode = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2
@@ -77,12 +73,9 @@ function ParticleName() {
 
     const offset = scroll.offset
     const positions = pointsRef.current.geometry.attributes.position.array as Float32Array
-
-    // Segments: Intro, 5 Words, Explosion
     const segments = [0.1, 0.25, 0.45, 0.65, 0.85, 0.95, 1.0]
 
-    // Calculate Rotation: We want one full 360 spin per word segment
-    let currentRotation = offset * Math.PI * 0.2 // Base slow rotation
+    let currentRotation = 0
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
@@ -103,12 +96,21 @@ function ParticleName() {
 
         const start = segments[wordIdx]
         const end = segments[wordIdx+1]
-        const range = end - start
-        const localProgress = (offset - start) / range // 0 to 1 within this word
+        const localProgress = (offset - start) / (end - start)
 
-        // Add a 180 degree spin (PI) based on local progress
-        if (i === 0) { // Only calculate rotation once per frame
-           currentRotation = (wordIdx * Math.PI) + (localProgress * Math.PI)
+        // --- IMPROVED ROTATION LOGIC ---
+        // Word is forward-facing (0 rotation) until mid-point
+        // Then spins 360 between 0.5 and 1.0 progress
+        if (i === 0) {
+           const rotationOffset = wordIdx * Math.PI * 2
+           if (localProgress < 0.5) {
+             currentRotation = rotationOffset
+           } else {
+             const t = (localProgress - 0.5) / 0.5
+             // Cubic easing for a smoother spin
+             const ease = t * t * (3 - 2 * t)
+             currentRotation = rotationOffset + (ease * Math.PI * 2)
+           }
         }
 
         const mid = (start + end) / 2
@@ -128,7 +130,7 @@ function ParticleName() {
         tx = THREE.MathUtils.lerp(data.targets[4][i3], data.explode[i3], t)
         ty = THREE.MathUtils.lerp(data.targets[4][i3+1], data.explode[i3+1], t)
         tz = THREE.MathUtils.lerp(data.targets[4][i3+2], data.explode[i3+2], t)
-        if (i === 0) currentRotation += t * 5 // Speed up spin on explosion
+        if (i === 0) currentRotation += t * 10
       }
 
       const smooth = offset > 0.95 ? 0.05 : 0.12
@@ -139,8 +141,8 @@ function ParticleName() {
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
     pointsRef.current.rotation.y = currentRotation
+    pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.2) * 0.05
 
-    // Camera distance
     state.camera.position.z = THREE.MathUtils.lerp(18, 12, offset)
     if (offset > 0.95) state.camera.position.z = 12 + (offset - 0.95) * 60
   })
