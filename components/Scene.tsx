@@ -1,103 +1,153 @@
 'use client'
 
-import React, { useRef, useMemo } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import React, { useRef, useMemo, useState, useEffect } from 'react'
+import { Canvas, useFrame, useLoader } from '@react-three/fiber'
 import {
   ScrollControls,
   Scroll,
   useScroll,
-  Float,
-  MeshDistortMaterial,
-  Icosahedron,
   PerspectiveCamera,
-  Stars
+  Stars,
+  Center,
+  Text3D
 } from '@react-three/drei'
 import * as THREE from 'three'
 
-function ParticleSphere() {
+// Font URL for the 3D text
+const FONT_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/fonts/helvetiker_bold.typeface.json'
+
+function ParticleName() {
   const scroll = useScroll()
   const pointsRef = useRef<THREE.Points>(null!)
+  const [textPositions, setTextPositions] = useState<Float32Array | null>(null)
 
-  // Create a distribution of points
-  const count = 2000
-  const [positions, stepArray] = useMemo(() => {
-    const positions = new Float32Array(count * 3)
-    const stepArray = new Float32Array(count)
+  const count = 4000 // Total number of particles
+
+  // 1. Generate Random Initial Positions
+  const initialPositions = useMemo(() => {
+    const pos = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      const r = 2
-      const theta = 2 * Math.PI * Math.random()
-      const phi = Math.acos(2 * Math.random() - 1)
-      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-      positions[i * 3 + 2] = r * Math.cos(phi)
-      stepArray[i] = Math.random()
+      pos[i * 3] = (Math.random() - 0.5) * 20
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 20
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 20
     }
-    return [positions, stepArray]
+    return pos
   }, [])
 
+  // 2. Generate Scattered Final Positions
+  const finalPositions = useMemo(() => {
+    const pos = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 30
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 30
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 30
+    }
+    return pos
+  }, [])
+
+  // This helper component is used just to extract geometry data from Text3D
+  const GeometryExtractor = () => {
+    const meshRef = useRef<THREE.Mesh>(null!)
+
+    useEffect(() => {
+      if (meshRef.current) {
+        const geometry = meshRef.current.geometry
+        geometry.center()
+
+        // Sample points from the geometry surface
+        const sampler = new THREE.BufferGeometry().copy(geometry)
+        const posAttr = geometry.getAttribute('position')
+        const samples = new Float32Array(count * 3)
+
+        for (let i = 0; i < count; i++) {
+          // Pick a random vertex from the text geometry
+          const index = Math.floor(Math.random() * posAttr.count)
+          samples[i * 3] = posAttr.getX(index)
+          samples[i * 3 + 1] = posAttr.getY(index)
+          samples[i * 3 + 2] = posAttr.getZ(index)
+        }
+        setTextPositions(samples)
+      }
+    }, [meshRef])
+
+    return (
+      <mesh ref={meshRef} visible={false}>
+        <Text3D font={FONT_URL} size={2} height={0.5} curveSegments={12} bevelEnabled bevelThickness={0.02} bevelSize={0.02}>
+          FIKER
+        </Text3D>
+      </mesh>
+    )
+  }
+
   useFrame((state) => {
-    const offset = scroll.offset
+    if (!textPositions || !pointsRef.current) return
 
-    // Rotate based on scroll
-    pointsRef.current.rotation.y = offset * Math.PI * 2
-    pointsRef.current.rotation.x = offset * 0.5
+    const offset = scroll.offset // 0 to 1
+    const positions = pointsRef.current.geometry.attributes.position.array as Float32Array
 
-    // Pulse effect
-    const time = state.clock.getElapsedTime()
-    pointsRef.current.scale.setScalar(1 + Math.sin(time * 0.5) * 0.1 + offset * 0.5)
+    // Animation phases
+    // 0.0 -> 0.4: Random -> "FIKER"
+    // 0.4 -> 0.6: Stay as "FIKER" + Rotate
+    // 0.6 -> 1.0: "FIKER" -> Dissolve
 
-    // Move slightly based on mouse? No, let's stick to scroll for now
-    pointsRef.current.position.y = -offset * 2
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3
+      let targetX, targetY, targetZ
+
+      if (offset < 0.4) {
+        // Morph from Initial to Text
+        const t = offset / 0.4
+        targetX = THREE.MathUtils.lerp(initialPositions[i3], textPositions[i3], t)
+        targetY = THREE.MathUtils.lerp(initialPositions[i3 + 1], textPositions[i3 + 1], t)
+        targetZ = THREE.MathUtils.lerp(initialPositions[i3 + 2], textPositions[i3 + 2], t)
+      } else if (offset < 0.6) {
+        // Stay as Text
+        targetX = textPositions[i3]
+        targetY = textPositions[i3 + 1]
+        targetZ = textPositions[i3 + 2]
+      } else {
+        // Morph from Text to Final (Dissolve)
+        const t = (offset - 0.6) / 0.4
+        targetX = THREE.MathUtils.lerp(textPositions[i3], finalPositions[i3], t)
+        targetY = THREE.MathUtils.lerp(textPositions[i3 + 1], finalPositions[i3 + 1], t)
+        targetZ = THREE.MathUtils.lerp(textPositions[i3 + 2], finalPositions[i3 + 2], t)
+      }
+
+      // Smooth interpolation for current position
+      positions[i3] = THREE.MathUtils.lerp(positions[i3], targetX, 0.1)
+      positions[i3 + 1] = THREE.MathUtils.lerp(positions[i3 + 1], targetY, 0.1)
+      positions[i3 + 2] = THREE.MathUtils.lerp(positions[i3 + 2], targetZ, 0.1)
+    }
+
+    pointsRef.current.geometry.attributes.position.needsUpdate = true
+
+    // Subtle rotation of the whole group
+    pointsRef.current.rotation.y = state.clock.getElapsedTime() * 0.1 + offset * Math.PI
+    pointsRef.current.rotation.x = Math.sin(state.clock.getElapsedTime() * 0.2) * 0.1
   })
 
   return (
-    <points ref={pointsRef}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={count}
-          array={positions}
-          itemSize={3}
+    <>
+      <GeometryExtractor />
+      <points ref={pointsRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            count={count}
+            array={initialPositions.slice()}
+            itemSize={3}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.04}
+          color="#3b82f6"
+          transparent
+          opacity={0.8}
+          sizeAttenuation
+          blending={THREE.AdditiveBlending}
         />
-      </bufferGeometry>
-      <pointsMaterial
-        size={0.015}
-        color="#3b82f6"
-        transparent
-        opacity={0.8}
-        sizeAttenuation
-      />
-    </points>
-  )
-}
-
-function FloatingShape() {
-  const meshRef = useRef<THREE.Mesh>(null!)
-  const scroll = useScroll()
-
-  useFrame((state) => {
-    const offset = scroll.offset
-    const time = state.clock.getElapsedTime()
-
-    meshRef.current.rotation.x = time * 0.2 + offset * Math.PI
-    meshRef.current.rotation.y = time * 0.3 + offset * Math.PI
-
-    // Move across the screen based on scroll
-    meshRef.current.position.x = Math.sin(offset * Math.PI) * 2
-    meshRef.current.position.z = -2 + offset * 2
-  })
-
-  return (
-    <Float speed={2} rotationIntensity={1} floatIntensity={1}>
-      <Icosahedron ref={meshRef} args={[1, 15]} position={[2, 0, -2]}>
-        <MeshDistortMaterial
-          color="#1d4ed8"
-          speed={2}
-          distort={0.4}
-          radius={1}
-        />
-      </Icosahedron>
-    </Float>
+      </points>
+    </>
   )
 }
 
@@ -107,93 +157,54 @@ function SceneContent() {
 
   useFrame(() => {
     const offset = scroll.offset
-    // Smooth camera transition
-    // At offset 0: x=0, y=0, z=5
-    // At offset 1: x=2, y=-2, z=4
     if (cameraRef.current) {
-      cameraRef.current.position.x = THREE.MathUtils.lerp(0, 3, offset)
-      cameraRef.current.position.y = THREE.MathUtils.lerp(0, -2, offset)
-      cameraRef.current.lookAt(0, -offset * 2, 0)
+      // Camera moves slightly forward and back
+      cameraRef.current.position.z = 8 + Math.sin(offset * Math.PI) * 2
+      cameraRef.current.lookAt(0, 0, 0)
     }
   })
 
   return (
     <>
-      <PerspectiveCamera makeDefault ref={cameraRef} position={[0, 0, 5]} />
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[10, 10, 5]} intensity={1} />
-      <pointLight position={[-10, -10, -10]} color="#3b82f6" intensity={2} />
+      <PerspectiveCamera makeDefault ref={cameraRef} position={[0, 0, 8]} />
+      <ambientLight intensity={1} />
+      <pointLight position={[10, 10, 10]} intensity={1.5} color="#3b82f6" />
 
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
-      <ParticleSphere />
-      <FloatingShape />
+      <ParticleName />
 
       <Scroll html>
-        <div className="w-screen">
+        <div className="w-screen text-white font-sans">
           {/* Section 1: Hero */}
           <section className="h-screen flex flex-col justify-center px-6 md:px-12 max-w-7xl mx-auto">
-            <div className="max-w-2xl">
-              <h1 className="text-6xl md:text-8xl font-bold tracking-tighter leading-[1.1] text-white">
-                Building robots, <br />
-                <span className="text-blue-500">tools, and ideas</span> <br />
-                that move.
+            <div className="max-w-3xl">
+              <h2 className="text-blue-500 font-mono tracking-widest mb-4 uppercase text-sm">Scroll to assemble</h2>
+              <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-none mb-8">
+                I AM <br /> FIKER.
               </h1>
-              <p className="text-xl md:text-2xl text-neutral-400 mt-8 max-w-xl leading-relaxed">
-                I’m Fiker — a student engineer working on robotics, computer vision, and modern web tools.
+              <p className="text-xl md:text-2xl text-neutral-400 max-w-xl leading-relaxed">
+                A student engineer building the future of robotics and computer vision.
               </p>
-              <div className="mt-12 flex gap-6">
-                <button className="px-8 py-4 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-colors">
-                  View Projects
-                </button>
-                <button className="px-8 py-4 border border-neutral-700 text-white rounded-full font-bold hover:bg-neutral-800 transition-colors">
-                  Learn more
-                </button>
-              </div>
             </div>
           </section>
 
-          {/* Section 2: Focus */}
-          <section className="h-screen flex items-center justify-end px-6 md:px-12 max-w-7xl mx-auto">
-            <div className="w-full lg:w-1/2 border border-neutral-800 bg-black/60 backdrop-blur-xl p-8 md:p-12 rounded-2xl shadow-2xl">
-              <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-blue-500 mb-8">
-                Current Focus
-              </h2>
-              <ul className="flex flex-col gap-8">
-                {[
-                  { title: "Autonomous blimp navigation", desc: "Exploring low-power altitude control and visual odometry." },
-                  { title: "AprilTag pose estimation pipeline", desc: "Optimizing C++ implementations for real-time edge processing." },
-                  { title: "Cable-driven tentacle robot", desc: "Designing biomimetic structures for soft robotics research." },
-                  { title: "Personal website + UI system", desc: "Crafting a minimal, high-performance digital presence." }
-                ].map((item, i) => (
-                  <li key={i} className="flex flex-col gap-2">
-                    <span className="font-bold text-xl text-white">{item.title}</span>
-                    <span className="text-neutral-400 text-base leading-relaxed">{item.desc}</span>
-                  </li>
-                ))}
-              </ul>
+          {/* Section 2: Transitions */}
+          <section className="h-screen flex items-center justify-center px-6">
+            <div className="text-center">
+              <h2 className="text-4xl md:text-6xl font-bold tracking-tight mb-4">Molding Data</h2>
+              <p className="text-neutral-400 text-lg md:text-xl">Transforming raw particles into meaningful structures.</p>
             </div>
           </section>
 
-          {/* Section 3: Call to action */}
+          {/* Section 3: Contact */}
           <section className="h-screen flex flex-col justify-center items-center px-6 text-center">
-            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter text-white mb-8">
-              Let's build something <br /> extraordinary.
-            </h2>
-            <p className="text-xl text-neutral-400 max-w-xl mb-12">
-              Currently seeking collaborations in robotics and computer vision.
-            </p>
-            <div className="flex gap-4">
-              <a href="#" className="text-neutral-400 hover:text-white transition-colors">GitHub</a>
-              <span className="text-neutral-700">/</span>
-              <a href="#" className="text-neutral-400 hover:text-white transition-colors">LinkedIn</a>
-              <span className="text-neutral-700">/</span>
-              <a href="#" className="text-neutral-400 hover:text-white transition-colors">Twitter</a>
+            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter mb-12">Let's work together.</h2>
+            <div className="flex gap-8 text-neutral-400 text-lg">
+              <a href="https://github.com/FikerBiruk" className="hover:text-blue-500 transition-colors">GitHub</a>
+              <a href="#" className="hover:text-blue-500 transition-colors">LinkedIn</a>
+              <a href="#" className="hover:text-blue-500 transition-colors">Twitter</a>
             </div>
-
-            <footer className="absolute bottom-12 text-neutral-600 text-sm">
-              &copy; {new Date().getFullYear()} Fiker. All rights reserved.
-            </footer>
           </section>
         </div>
       </Scroll>
@@ -203,9 +214,9 @@ function SceneContent() {
 
 export default function Scene() {
   return (
-    <div className="h-screen w-full bg-black">
+    <div className="h-screen w-full bg-[#050505]">
       <Canvas shadows>
-        <ScrollControls pages={3} damping={0.2}>
+        <ScrollControls pages={3} damping={0.1}>
           <SceneContent />
         </ScrollControls>
       </Canvas>
