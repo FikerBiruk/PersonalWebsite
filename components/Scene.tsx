@@ -36,11 +36,11 @@ function ParticleName() {
       const textGeo = new TextGeometry(word, {
         font: font,
         size: word.length > 7 ? 2 : 2.5,
-        height: 0.8,
+        height: 1.0, // Decent depth
         curveSegments: 8,
         bevelEnabled: true,
-        bevelThickness: 0.1,
-        bevelSize: 0.1,
+        bevelThickness: 0.15,
+        bevelSize: 0.15,
       })
       textGeo.center()
       const tempMesh = new THREE.Mesh(textGeo)
@@ -52,17 +52,18 @@ function ParticleName() {
         sampler.sample(tempPos)
         targetArr[i * 3] = tempPos.x
         targetArr[i * 3 + 1] = tempPos.y
-        targetArr[i * 3 + 2] = tempPos.z + (Math.random() - 0.5) * 0.4
+        // Add jitter to fill the 3D volume
+        targetArr[i * 3 + 2] = tempPos.z + (Math.random() - 0.5) * 0.5
       }
       return targetArr
     })
 
-    // 3. Final explosion (Sphere)
+    // 3. Final explosion
     const explode = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos((Math.random() * 2) - 1)
-      const dist = 60 + Math.random() * 30
+      const dist = 70 + Math.random() * 30
       explode[i * 3] = dist * Math.sin(phi) * Math.cos(theta)
       explode[i * 3 + 1] = dist * Math.sin(phi) * Math.sin(theta)
       explode[i * 3 + 2] = dist * Math.cos(phi)
@@ -77,28 +78,21 @@ function ParticleName() {
     const offset = scroll.offset
     const positions = pointsRef.current.geometry.attributes.position.array as Float32Array
 
-    // Timeline mapping for 6 pages (0 to 1)
-    // 0.0 - 0.1: Nebula
-    // 0.1 - 0.25: FIKER
-    // 0.25 - 0.45: BIRUK
-    // 0.45 - 0.65: RANDOM
-    // 0.65 - 0.85: TESTING
-    // 0.85 - 0.95: OTHER
-    // 0.95 - 1.0: EXPLODE
-
+    // Segments: Intro, 5 Words, Explosion
     const segments = [0.1, 0.25, 0.45, 0.65, 0.85, 0.95, 1.0]
+
+    // Calculate Rotation: We want one full 360 spin per word segment
+    let currentRotation = offset * Math.PI * 0.2 // Base slow rotation
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
       let tx, ty, tz
 
       if (offset < segments[0]) {
-        // Nebula
         tx = data.initial[i3]
         ty = data.initial[i3+1]
         tz = data.initial[i3+2]
       } else if (offset < segments[5]) {
-        // Find which word we are in
         let wordIdx = 0
         for(let j = 0; j < 5; j++) {
            if (offset < segments[j+1]) {
@@ -109,10 +103,17 @@ function ParticleName() {
 
         const start = segments[wordIdx]
         const end = segments[wordIdx+1]
-        const mid = (start + end) / 2
+        const range = end - start
+        const localProgress = (offset - start) / range // 0 to 1 within this word
 
-        // If we are in the first half of the segment, morph from previous
-        // If in second half, hold
+        // Add a 360 degree spin (2 * PI) based on local progress
+        // We'll use a sine curve so it starts and ends flat (readable)
+        // and spins in the middle of the transition/hold
+        if (i === 0) { // Only calculate rotation once per frame
+           currentRotation = (wordIdx * Math.PI * 2) + (localProgress * Math.PI * 2)
+        }
+
+        const mid = (start + end) / 2
         if (offset < mid) {
           const t = (offset - start) / (mid - start)
           const prevTarget = wordIdx === 0 ? data.initial : data.targets[wordIdx - 1]
@@ -125,14 +126,13 @@ function ParticleName() {
           tz = data.targets[wordIdx][i3+2]
         }
       } else {
-        // Explosion
         const t = (offset - segments[5]) / (1.0 - segments[5])
         tx = THREE.MathUtils.lerp(data.targets[4][i3], data.explode[i3], t)
         ty = THREE.MathUtils.lerp(data.targets[4][i3+1], data.explode[i3+1], t)
         tz = THREE.MathUtils.lerp(data.targets[4][i3+2], data.explode[i3+2], t)
+        if (i === 0) currentRotation += t * 5 // Speed up spin on explosion
       }
 
-      // Physics interpolation
       const smooth = offset > 0.95 ? 0.05 : 0.12
       positions[i3] += (tx - positions[i3]) * smooth
       positions[i3+1] += (ty - positions[i3+1]) * smooth
@@ -140,16 +140,11 @@ function ParticleName() {
     }
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
+    pointsRef.current.rotation.y = currentRotation
 
-    // Dynamic camera and light behavior
+    // Camera distance
     state.camera.position.z = THREE.MathUtils.lerp(18, 12, offset)
-    if (offset > 0.9) {
-        state.camera.position.z = 12 + (offset - 0.9) * 40 // Pull back fast
-    }
-
-    // Subtle rotation
-    pointsRef.current.rotation.y = offset * Math.PI * 0.5
-    pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.2) * 0.1
+    if (offset > 0.95) state.camera.position.z = 12 + (offset - 0.95) * 60
   })
 
   return (
@@ -163,7 +158,7 @@ function ParticleName() {
         />
       </bufferGeometry>
       <pointsMaterial
-        size={0.04}
+        size={0.045}
         color="#3b82f6"
         transparent
         opacity={0.8}
@@ -179,8 +174,8 @@ function SceneContent() {
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 0, 18]} />
-      <ambientLight intensity={1} />
-      <pointLight position={[10, 10, 10]} intensity={2} color="#60a5fa" />
+      <ambientLight intensity={1.5} />
+      <pointLight position={[10, 10, 10]} intensity={3} color="#60a5fa" />
       <Stars radius={150} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
       <Suspense fallback={null}>
@@ -192,21 +187,11 @@ function SceneContent() {
           <section className="h-screen flex items-center justify-center">
             <h2 className="opacity-20">Initialize System</h2>
           </section>
-          <section className="h-screen flex items-end justify-center pb-24">
-            <h2 className="opacity-40">Identity Formation</h2>
-          </section>
-          <section className="h-screen flex items-center justify-center">
-            <h2 className="opacity-40">Data Processing</h2>
-          </section>
-          <section className="h-screen flex items-center justify-center">
-            <h2 className="opacity-40">Kinetic Evolution</h2>
-          </section>
-          <section className="h-screen flex items-center justify-center">
-            <h2 className="opacity-40">Refining Logic</h2>
-          </section>
-          <section className="h-screen flex items-center justify-center">
-            <h2 className="opacity-80 text-blue-500">Entropy Reach</h2>
-          </section>
+          {["Identity", "Origin", "Process", "Logic", "Entropy"].map((label, i) => (
+            <section key={i} className="h-screen flex items-end justify-center pb-24">
+              <h2 className="opacity-40">{label}</h2>
+            </section>
+          ))}
         </div>
       </Scroll>
     </>
@@ -217,7 +202,7 @@ export default function Scene() {
   return (
     <div className="h-screen w-full bg-black">
       <Canvas>
-        <ScrollControls pages={6} damping={0.25}>
+        <ScrollControls pages={7} damping={0.3}>
           <SceneContent />
         </ScrollControls>
       </Canvas>
