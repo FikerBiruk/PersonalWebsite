@@ -106,11 +106,9 @@ function ParticleName() {
         const range = end - start
         const localProgress = (offset - start) / range // 0 to 1 within this word
 
-        // Add a 360 degree spin (2 * PI) based on local progress
-        // We'll use a sine curve so it starts and ends flat (readable)
-        // and spins in the middle of the transition/hold
+        // Add a 180 degree spin (PI) based on local progress
         if (i === 0) { // Only calculate rotation once per frame
-           currentRotation = (wordIdx * Math.PI * 2) + (localProgress * Math.PI * 2)
+           currentRotation = (wordIdx * Math.PI) + (localProgress * Math.PI)
         }
 
         const mid = (start + end) / 2
