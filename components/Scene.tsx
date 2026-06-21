@@ -101,14 +101,12 @@ function ParticleName() {
         const end = segments[wordIdx+1]
         const rawProgress = (offset - start) / (end - start)
 
-        // --- SNAP-MORPH LOGIC ---
-        // We want the transition to happen in the first 65% of the segment
-        // and "hold" for the remaining 35%.
-        const transitionThreshold = 0.65
-        const holdProgress = Math.min(rawProgress / transitionThreshold, 1.0)
-
-        // Use an easing function (ease-out cubic) for a snappier arrival
-        const ease = 1 - Math.pow(1 - holdProgress, 3)
+        // --- Easing logic for the spin and morph ---
+        // Instead of a "hold", we use a smooth easing function (Ease In Out Quad)
+        // This makes the transition feel like it has "momentum" - fast in the middle, slow at the word.
+        const ease = rawProgress < 0.5
+          ? 2 * rawProgress * rawProgress
+          : 1 - Math.pow(-2 * rawProgress + 2, 2) / 2
 
         const prevTarget = wordIdx === 0 ? data.initial : data.targets[wordIdx - 1]
         const currentTarget = data.targets[wordIdx]
@@ -130,6 +128,7 @@ function ParticleName() {
         if (i === 0) currentRotation = (5 * Math.PI * 2) + (t * 15)
       }
 
+      // Physics smoothing
       const smooth = offset > 0.85 ? 0.05 : 0.18
       positions[i3] += (tx - positions[i3]) * smooth
       positions[i3+1] += (ty - positions[i3+1]) * smooth
