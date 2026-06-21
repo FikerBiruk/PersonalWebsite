@@ -10,7 +10,7 @@ import {
   PerspectiveCamera,
   Stars,
 } from '@react-three/drei'
-import { FontLoader, TextGeometry } from 'three-stdlib'
+import { FontLoader, TextGeometry, MeshSurfaceSampler } from 'three-stdlib'
 
 const FONT_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/fonts/helvetiker_bold.typeface.json'
 
@@ -19,7 +19,7 @@ function ParticleName() {
   const pointsRef = useRef<THREE.Points>(null!)
   const font = useLoader(FontLoader, FONT_URL)
 
-  const count = 15000 // Higher count for better definition
+  const count = 20000 // Increased count for higher resolution
 
   const positions = useMemo(() => {
     // 1. Initial random cloud
@@ -30,33 +30,27 @@ function ParticleName() {
       initial[i * 3 + 2] = (Math.random() - 0.5) * 60
     }
 
-    // 2. Target Name "FIKER" with uniform distribution
+    // 2. Target Name "FIKER" using Surface Sampling
     const textGeo = new TextGeometry('FIKER', {
       font: font,
       size: 3,
-      height: 0.8,
+      height: 0.2, // Thinner height for sharper letters
       curveSegments: 12,
       bevelEnabled: false
     })
     textGeo.center()
 
-    const posAttr = textGeo.getAttribute('position')
+    // Create a temporary mesh to sample from the surface (the faces)
+    const tempMesh = new THREE.Mesh(textGeo)
+    const sampler = new MeshSurfaceSampler(tempMesh).build()
     const target = new Float32Array(count * 3)
+    const tempPosition = new THREE.Vector3()
 
-    // To ensure even distribution across all letters,
-    // we cycle through all available vertices in the geometry
     for (let i = 0; i < count; i++) {
-      const vertexIndex = i % posAttr.count
-
-      // Base position from geometry
-      const x = posAttr.getX(vertexIndex)
-      const y = posAttr.getY(vertexIndex)
-      const z = posAttr.getZ(vertexIndex)
-
-      // Add "volume" by jittering slightly within the letter space
-      target[i * 3] = x + (Math.random() - 0.5) * 0.2
-      target[i * 3 + 1] = y + (Math.random() - 0.5) * 0.2
-      target[i * 3 + 2] = z + (Math.random() - 0.5) * 0.6
+      sampler.sample(tempPosition)
+      target[i * 3] = tempPosition.x
+      target[i * 3 + 1] = tempPosition.y
+      target[i * 3 + 2] = tempPosition.z + (Math.random() - 0.5) * 0.1 // Tiny bit of depth
     }
 
     // 3. Final explosion
@@ -64,7 +58,7 @@ function ParticleName() {
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos((Math.random() * 2) - 1)
-      const dist = 50 + Math.random() * 20
+      const dist = 40 + Math.random() * 20
       explode[i * 3] = dist * Math.sin(phi) * Math.cos(theta)
       explode[i * 3 + 1] = dist * Math.sin(phi) * Math.sin(theta)
       explode[i * 3 + 2] = dist * Math.cos(phi)
@@ -79,41 +73,42 @@ function ParticleName() {
     const offset = scroll.offset
     const currentPositions = pointsRef.current.geometry.attributes.position.array as Float32Array
 
-    // Define 3 phases: Assemble (0-0.4), Hold (0.4-0.7), Dissolve (0.7-1.0)
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
       let tx, ty, tz
 
+      // Phase 1: Assemble (0 to 0.4)
       if (offset < 0.4) {
-        // Phase 1: Assemble
         const t = offset / 0.4
         tx = THREE.MathUtils.lerp(positions.initial[i3], positions.target[i3], t)
         ty = THREE.MathUtils.lerp(positions.initial[i3+1], positions.target[i3+1], t)
         tz = THREE.MathUtils.lerp(positions.initial[i3+2], positions.target[i3+2], t)
-      } else if (offset < 0.7) {
-        // Phase 2: Hold clearly
+      }
+      // Phase 2: Hold (0.4 to 0.7)
+      else if (offset < 0.7) {
         tx = positions.target[i3]
         ty = positions.target[i3+1]
         tz = positions.target[i3+2]
-      } else {
-        // Phase 3: Dissolve
+      }
+      // Phase 3: Dissolve (0.7 to 1.0)
+      else {
         const t = (offset - 0.7) / 0.3
         tx = THREE.MathUtils.lerp(positions.target[i3], positions.explode[i3], t)
         ty = THREE.MathUtils.lerp(positions.target[i3+1], positions.explode[i3+1], t)
         tz = THREE.MathUtils.lerp(positions.target[i3+2], positions.explode[i3+2], t)
       }
 
-      // Smooth interpolation for the particles
-      currentPositions[i3] += (tx - currentPositions[i3]) * 0.1
-      currentPositions[i3+1] += (ty - currentPositions[i3+1]) * 0.1
-      currentPositions[i3+2] += (tz - currentPositions[i3+2]) * 0.1
+      // Smooth step
+      currentPositions[i3] += (tx - currentPositions[i3]) * 0.15
+      currentPositions[i3+1] += (ty - currentPositions[i3+1]) * 0.15
+      currentPositions[i3+2] += (tz - currentPositions[i3+2]) * 0.15
     }
 
     pointsRef.current.geometry.attributes.position.needsUpdate = true
 
-    // Slow down rotation during the "Hold" phase to make it readable
-    const rotationSpeed = offset > 0.4 && offset < 0.7 ? 0.1 : 0.4
-    pointsRef.current.rotation.y = offset * Math.PI * rotationSpeed
+    // Minimal rotation during hold for maximum legibility
+    const rotAmount = offset > 0.4 && offset < 0.7 ? 0.05 : 0.3
+    pointsRef.current.rotation.y = offset * Math.PI * rotAmount
   })
 
   return (
@@ -127,10 +122,10 @@ function ParticleName() {
         />
       </bufferGeometry>
       <pointsMaterial
-        size={0.06}
+        size={0.035} // Smaller particles for better detail
         color="#60a5fa"
         transparent
-        opacity={0.9}
+        opacity={0.8}
         sizeAttenuation
         blending={THREE.AdditiveBlending}
         depthWrite={false}
@@ -142,9 +137,9 @@ function ParticleName() {
 function SceneContent() {
   return (
     <>
-      <PerspectiveCamera makeDefault position={[0, 0, 15]} />
-      <ambientLight intensity={2} />
-      <Stars radius={150} depth={50} count={7000} factor={4} saturation={0} fade speed={1} />
+      <PerspectiveCamera makeDefault position={[0, 0, 12]} />
+      <ambientLight intensity={1} />
+      <Stars radius={150} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
       <Suspense fallback={null}>
         <ParticleName />
@@ -153,19 +148,18 @@ function SceneContent() {
       <Scroll html>
         <div className="w-screen pointer-events-none text-white font-sans">
           <section className="h-screen flex items-center justify-center">
-            <h2 className="text-white/40 text-xs font-mono tracking-[1em] uppercase">Scroll to form</h2>
+            <h2 className="text-white/20 text-[10px] font-mono tracking-[1.5em] uppercase">Initialize</h2>
           </section>
 
-          {/* This section aligns with the "Hold" phase (0.4 - 0.7) */}
-          <section className="h-[150vh] flex items-center justify-center">
-            <div className="text-center p-8">
-               <h3 className="text-blue-400 font-mono tracking-widest uppercase text-sm mb-4">Engineering Reality</h3>
-               <p className="max-w-md mx-auto text-neutral-400 text-lg">I build autonomous systems that bridge the gap between digital data and physical motion.</p>
+          <section className="h-[200vh] flex items-center justify-center">
+            <div className="text-center">
+               <p className="text-blue-500 font-mono tracking-widest uppercase text-xs">Fiker Biruk</p>
+               <h1 className="text-white text-lg font-light tracking-tighter opacity-50 mt-2">Robotics & Vision</h1>
             </div>
           </section>
 
           <section className="h-screen flex flex-col justify-center items-center">
-             <h2 className="text-white text-5xl font-bold tracking-tighter italic">Dissolving complexity.</h2>
+             <h2 className="text-white/40 text-xs font-mono uppercase tracking-widest italic">Dissolve to Stars</h2>
           </section>
         </div>
       </Scroll>
@@ -175,9 +169,9 @@ function SceneContent() {
 
 export default function Scene() {
   return (
-    <div className="h-screen w-full bg-[#020202]">
+    <div className="h-screen w-full bg-black">
       <Canvas>
-        <ScrollControls pages={4} damping={0.3}>
+        <ScrollControls pages={4} damping={0.2}>
           <SceneContent />
         </ScrollControls>
       </Canvas>
