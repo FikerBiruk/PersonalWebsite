@@ -12,66 +12,68 @@ import {
 } from '@react-three/drei'
 import * as THREE from 'three'
 
-// Use a local font path or a more reliable CDN if possible.
-// For now, keeping the CDN but wrapping in Suspense to prevent crashes.
 const FONT_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/fonts/helvetiker_bold.typeface.json'
 
 function ParticleName() {
   const scroll = useScroll()
   const pointsRef = useRef<THREE.Points>(null!)
-  const [textPositions, setTextPositions] = useState<Float32Array | null>(null)
 
-  const count = 4000 // Total number of particles
+  // The state that holds the "target" coordinates for each particle to form the name
+  const [targetPositions, setTargetPositions] = useState<Float32Array | null>(null)
 
-  // 1. Generate Random Initial Positions
+  const count = 10000 // High particle count for a thick "3D" look
+
+  // 1. Initial random cloud positions
   const initialPositions = useMemo(() => {
     const pos = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 20
-      pos[i * 3 + 1] = (Math.random() - 0.5) * 20
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 20
+      pos[i * 3] = (Math.random() - 0.5) * 40
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 40
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 40
     }
     return pos
   }, [])
 
-  // 2. Generate Scattered Final Positions
-  const finalPositions = useMemo(() => {
+  // 2. Final "explosion" positions
+  const explodePositions = useMemo(() => {
     const pos = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 30
-      pos[i * 3 + 1] = (Math.random() - 0.5) * 30
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 30
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos((Math.random() * 2) - 1)
+      const dist = 30 + Math.random() * 20
+      pos[i * 3] = dist * Math.sin(phi) * Math.cos(theta)
+      pos[i * 3 + 1] = dist * Math.sin(phi) * Math.sin(theta)
+      pos[i * 3 + 2] = dist * Math.cos(phi)
     }
     return pos
   }, [])
 
-  // This helper component extracts geometry data from Text3D
-  const GeometryExtractor = () => {
+  // Component to extract vertices from the Text3D mesh
+  const TextGeometrySampler = () => {
     const meshRef = useRef<THREE.Mesh>(null!)
 
     useEffect(() => {
       if (meshRef.current && meshRef.current.geometry) {
-        const geometry = meshRef.current.geometry
-        geometry.center()
-
-        const posAttr = geometry.getAttribute('position')
+        const geo = meshRef.current.geometry
+        geo.center()
+        const posAttr = geo.getAttribute('position')
         const samples = new Float32Array(count * 3)
 
-        if (posAttr) {
-          for (let i = 0; i < count; i++) {
-            const index = Math.floor(Math.random() * posAttr.count)
-            samples[i * 3] = posAttr.getX(index)
-            samples[i * 3 + 1] = posAttr.getY(index)
-            samples[i * 3 + 2] = posAttr.getZ(index)
-          }
-          setTextPositions(samples)
+        // Sample random points from the text's surface to fill it out
+        for (let i = 0; i < count; i++) {
+          const index = Math.floor(Math.random() * posAttr.count)
+          // Add some jitter/noise so it looks like a 3D volume, not just flat vertices
+          samples[i * 3] = posAttr.getX(index) + (Math.random() - 0.5) * 0.1
+          samples[i * 3 + 1] = posAttr.getY(index) + (Math.random() - 0.5) * 0.1
+          samples[i * 3 + 2] = posAttr.getZ(index) + (Math.random() - 0.5) * 0.5
         }
+        setTargetPositions(samples)
       }
     }, [])
 
     return (
       <mesh ref={meshRef} visible={false}>
-        <Text3D font={FONT_URL} size={2} height={0.5}>
+        <Text3D font={FONT_URL} size={2.5} height={0.8} curveSegments={12}>
           FIKER
         </Text3D>
       </mesh>
@@ -79,44 +81,48 @@ function ParticleName() {
   }
 
   useFrame((state) => {
-    if (!textPositions || !pointsRef.current) return
+    if (!targetPositions || !pointsRef.current) return
 
-    const offset = scroll.offset
-    const positions = pointsRef.current.geometry.attributes.position.array as Float32Array
+    const offset = scroll.offset // 0 to 1
+    const posAttr = pointsRef.current.geometry.attributes.position
+    const positions = posAttr.array as Float32Array
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
-      let targetX, targetY, targetZ
+      let tx, ty, tz
 
-      if (offset < 0.4) {
-        const t = offset / 0.4
-        targetX = THREE.MathUtils.lerp(initialPositions[i3], textPositions[i3], t)
-        targetY = THREE.MathUtils.lerp(initialPositions[i3 + 1], textPositions[i3 + 1], t)
-        targetZ = THREE.MathUtils.lerp(initialPositions[i3 + 2], textPositions[i3 + 2], t)
-      } else if (offset < 0.6) {
-        targetX = textPositions[i3]
-        targetY = textPositions[i3 + 1]
-        targetZ = textPositions[i3 + 2]
-      } else {
-        const t = (offset - 0.6) / 0.4
-        targetX = THREE.MathUtils.lerp(textPositions[i3], finalPositions[i3], t)
-        targetY = THREE.MathUtils.lerp(textPositions[i3 + 1], finalPositions[i3 + 1], t)
-        targetZ = THREE.MathUtils.lerp(textPositions[i3 + 2], finalPositions[i3 + 2], t)
+      // Phase 1: 0 to 0.5 -> Random Cloud to Name
+      if (offset < 0.5) {
+        const t = offset / 0.5
+        tx = THREE.MathUtils.lerp(initialPositions[i3], targetPositions[i3], t)
+        ty = THREE.MathUtils.lerp(initialPositions[i3+1], targetPositions[i3+1], t)
+        tz = THREE.MathUtils.lerp(initialPositions[i3+2], targetPositions[i3+2], t)
+      }
+      // Phase 2: 0.5 to 1.0 -> Name to Explosion
+      else {
+        const t = (offset - 0.5) / 0.5
+        tx = THREE.MathUtils.lerp(targetPositions[i3], explodePositions[i3], t)
+        ty = THREE.MathUtils.lerp(targetPositions[i3+1], explodePositions[i3+1], t)
+        tz = THREE.MathUtils.lerp(targetPositions[i3+2], explodePositions[i3+2], t)
       }
 
-      positions[i3] = THREE.MathUtils.lerp(positions[i3], targetX, 0.1)
-      positions[i3 + 1] = THREE.MathUtils.lerp(positions[i3 + 1], targetY, 0.1)
-      positions[i3 + 2] = THREE.MathUtils.lerp(positions[i3 + 2], targetZ, 0.1)
+      // Apply with smoothing to prevent jitter
+      positions[i3] += (tx - positions[i3]) * 0.1
+      positions[i3+1] += (ty - positions[i3+1]) * 0.1
+      positions[i3+2] += (tz - positions[i3+2]) * 0.1
     }
 
-    pointsRef.current.geometry.attributes.position.needsUpdate = true
-    pointsRef.current.rotation.y = state.clock.getElapsedTime() * 0.1 + offset * Math.PI
+    posAttr.needsUpdate = true
+
+    // Slow rotation to give depth
+    pointsRef.current.rotation.y = offset * Math.PI * 0.5
+    pointsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.5) * 0.1
   })
 
   return (
     <>
       <Suspense fallback={null}>
-        <GeometryExtractor />
+        <TextGeometrySampler />
       </Suspense>
       <points ref={pointsRef}>
         <bufferGeometry>
@@ -141,54 +147,32 @@ function ParticleName() {
 }
 
 function SceneContent() {
-  const scroll = useScroll()
-  const cameraRef = useRef<THREE.PerspectiveCamera>(null!)
-
-  useFrame(() => {
-    const offset = scroll.offset
-    if (cameraRef.current) {
-      cameraRef.current.position.z = 8 + Math.sin(offset * Math.PI) * 2
-      cameraRef.current.lookAt(0, 0, 0)
-    }
-  })
-
   return (
     <>
-      <PerspectiveCamera makeDefault ref={cameraRef} position={[0, 0, 8]} />
+      <PerspectiveCamera makeDefault position={[0, 0, 10]} />
       <ambientLight intensity={1} />
-      <pointLight position={[10, 10, 10]} intensity={1.5} color="#3b82f6" />
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
 
       <ParticleName />
 
       <Scroll html>
-        <div className="w-screen text-white font-sans pointer-events-none">
-          <section className="h-screen flex flex-col justify-center px-6 md:px-12 max-w-7xl mx-auto pointer-events-auto">
-            <div className="max-w-3xl">
-              <h2 className="text-blue-500 font-mono tracking-widest mb-4 uppercase text-sm">Scroll to assemble</h2>
-              <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-none mb-8">
-                I AM <br /> FIKER.
-              </h1>
-              <p className="text-xl md:text-2xl text-neutral-400 max-w-xl leading-relaxed">
-                A student engineer building the future of robotics and computer vision.
-              </p>
-            </div>
+        <div className="w-screen pointer-events-none">
+          {/* Section 1: Empty to show particles assembling */}
+          <section className="h-screen flex items-center justify-center">
+            <h2 className="text-white/20 text-sm font-mono animate-pulse uppercase tracking-[0.5em]">Scroll to Begin</h2>
           </section>
 
-          <section className="h-screen flex items-center justify-center px-6 pointer-events-auto">
+          {/* Section 2: The Name Is Assembled Here */}
+          <section className="h-screen flex items-center justify-center">
             <div className="text-center">
-              <h2 className="text-4xl md:text-6xl font-bold tracking-tight mb-4">Molding Data</h2>
-              <p className="text-neutral-400 text-lg md:text-xl">Transforming raw particles into meaningful structures.</p>
+               {/* Minimalist text so it doesn't cover the particle name */}
+               <p className="text-blue-500 font-mono tracking-widest uppercase">Robotics & Vision</p>
             </div>
           </section>
 
-          <section className="h-screen flex flex-col justify-center items-center px-6 text-center pointer-events-auto">
-            <h2 className="text-5xl md:text-7xl font-bold tracking-tighter mb-12">Let's work together.</h2>
-            <div className="flex gap-8 text-neutral-400 text-lg">
-              <a href="https://github.com/FikerBiruk" className="hover:text-blue-500 transition-colors">GitHub</a>
-              <a href="#" className="hover:text-blue-500 transition-colors">LinkedIn</a>
-              <a href="#" className="hover:text-blue-500 transition-colors">Twitter</a>
-            </div>
+          {/* Section 3: Dissolving */}
+          <section className="h-screen flex flex-col justify-center items-center">
+             <h2 className="text-white text-5xl font-bold tracking-tighter">Beyond the Code</h2>
           </section>
         </div>
       </Scroll>
@@ -198,9 +182,9 @@ function SceneContent() {
 
 export default function Scene() {
   return (
-    <div className="h-screen w-full bg-[#050505]">
-      <Canvas shadows>
-        <ScrollControls pages={3} damping={0.1}>
+    <div className="h-screen w-full bg-black">
+      <Canvas>
+        <ScrollControls pages={3} damping={0.2}>
           <SceneContent />
         </ScrollControls>
       </Canvas>
