@@ -1,42 +1,29 @@
 'use client'
 
-import dynamic from 'next/dynamic'
-
-const Scene = dynamic(() => import('@/components/Scene'), {
-  ssr: false,
-  loading: () => <div className="h-screen w-full bg-[#0a0a0a]" />
-})
+import React from 'react';
+import ParticleBackground from '@/components/ParticleBackground';
+import { CursorTrail } from '@/components/ReactBits';
+import { Hero, About, Projects, Skills, Contact } from '@/components/Sections';
 
 export default function Home() {
   return (
-    <main className="relative h-screen w-full bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
-      {/* 3D Background */}
-      <Scene />
+    <main className="relative min-h-screen bg-black overflow-x-hidden selection:bg-white selection:text-black">
+      {/* Background Layer */}
+      <ParticleBackground />
+      <CursorTrail color="#ffffff" size={12} smoothing={0.2} />
 
-      {/* Main Text Content */}
-      <div className="relative z-10 text-center">
-        <h1 className="text-white text-6xl md:text-8xl font-bold tracking-tighter">
-          Fiker Biruk
-        </h1>
-        <p className="text-blue-500 font-mono tracking-widest uppercase mt-4 text-sm">
-          Robotics & Vision Engineer
-        </p>
-
-        <div className="mt-10">
-          <a
-            href="mailto:contact@fiker.dev"
-            className="px-8 py-3 border border-white/20 text-white hover:bg-white hover:text-black transition-all rounded-full text-sm font-medium"
-          >
-            Get in touch
-          </a>
-        </div>
+      {/* Content Layers */}
+      <div className="relative z-10">
+        <Hero />
+        <About />
+        <Projects />
+        <Skills />
+        <Contact />
       </div>
 
-      {/* Simple Footer Links */}
-      <div className="absolute bottom-10 flex gap-8 text-xs font-mono text-neutral-500">
-        <a href="https://github.com/FikerBiruk" className="hover:text-white transition-colors">GITHUB</a>
-        <a href="#" className="hover:text-white transition-colors">LINKEDIN</a>
-      </div>
+      <footer className="py-12 text-center text-[10px] text-neutral-600 tracking-[0.3em] font-mono uppercase">
+        All systems operational // [INSERT NAME]
+      </footer>
     </main>
-  )
+  );
 }
